@@ -21,8 +21,11 @@
 
 #include "arg.h"
 #include "util.h"
+#include "time.h"
 
 char *argv0;
+
+#define NUMCOLORS 7
 
 enum {
 	INIT,
@@ -36,6 +39,7 @@ struct lock {
 	Window root, win;
 	Pixmap pmap;
 	unsigned long colors[NUMCOLS];
+	unsigned long input_colors[NUMCOLORS];
 };
 
 struct xrandr {
@@ -130,8 +134,9 @@ readpw(Display *dpy, struct xrandr *rr, struct lock **locks, int nscreens,
 {
 	XRRScreenChangeNotifyEvent *rre;
 	char buf[32], passwd[256], *inputhash;
-	int num, screen, running, failure, oldc;
+	int num, screen, running, failure, oldc, nextc;
 	unsigned int len, color;
+	int next_input_color = 0;
 	KeySym ksym;
 	XEvent ev;
 
@@ -139,6 +144,8 @@ readpw(Display *dpy, struct xrandr *rr, struct lock **locks, int nscreens,
 	running = 1;
 	failure = 0;
 	oldc = INIT;
+
+	srand(time(NULL));
 
 	while (running && !XNextEvent(dpy, &ev)) {
 		if (ev.type == KeyPress) {
@@ -185,11 +192,18 @@ readpw(Display *dpy, struct xrandr *rr, struct lock **locks, int nscreens,
 					memcpy(passwd + len, buf, num);
 					len += num;
 				}
+				next_input_color = (rand() % change_per_avg) == 0;
 				break;
 			}
 			color = len ? INPUT : ((failure || failonclear) ? FAILED : INIT);
-			if (running && oldc != color) {
+			if (running && (oldc != color || next_input_color)) {
+				if(next_input_color) {
+					nextc = rand() % NUMCOLORS;
+				}
 				for (screen = 0; screen < nscreens; screen++) {
+					if(next_input_color) {
+						locks[screen]->colors[INPUT] = locks[screen]->input_colors[nextc];
+					}
 					XSetWindowBackground(dpy,
 					                     locks[screen]->win,
 					                     locks[screen]->colors[color]);
@@ -239,6 +253,11 @@ lockscreen(Display *dpy, struct xrandr *rr, int screen)
 		XAllocNamedColor(dpy, DefaultColormap(dpy, lock->screen),
 		                 colorname[i], &color, &dummy);
 		lock->colors[i] = color.pixel;
+	}
+	for (i = 0; i < NUMCOLORS; i++) {
+		XAllocNamedColor(dpy, DefaultColormap(dpy, lock->screen),
+		                 input_colorname[i], &color, &dummy);
+		lock->input_colors[i] = color.pixel;
 	}
 
 	/* init */
